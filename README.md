@@ -1,227 +1,120 @@
-# Ansys MCP Server
+# Ansys Fluent MCP Server
 
-A [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server that provides AI assistants with the ability to interact with Ansys simulation software. This server enables seamless integration between AI tools and Ansys products like Fluent, MAPDL, Mechanical, and others.
+讓 Claude 等 AI 助手透過 [PyFluent](https://fluent.docs.pyansys.com/) 直接操作 Ansys Fluent：
+開啟／連線 Fluent、讀 case、下 TUI 指令、初始化與迭代，並且**診斷收斂問題**（例如 continuity 不收斂）。
 
-## Features
+> 非 Ansys 官方工具。
 
-- **Multi-Product Support**: Interface with various Ansys products (Fluent, MAPDL, Mechanical, Geometry)
-- **Session Management**: Create and manage Ansys simulation sessions
-- **File Operations**: Read and analyze Ansys files (.cas, .dat, .inp, .rst, etc.)
-- **Command Execution**: Execute MAPDL commands and Fluent operations
-- **Status Monitoring**: Check Ansys installation and module availability
-- **Working Directory Management**: Organize simulation files and results
+## 功能
 
-## Supported Ansys Products
+| 工具 | 說明 |
+|---|---|
+| `check_environment` | Python / PyFluent 版本、已安裝的 Ansys 版本（`AWP_ROOTxxx`）、連線狀態 |
+| `launch_fluent` | 開新的 Fluent（可指定版本 `2025R2`、核心數、是否顯示 GUI），session 會一直保留 |
+| `connect_to_fluent` | 連到你**自己已經開好**的 Fluent（斷線時不會關掉 Fluent） |
+| `close_fluent` | 關閉 session |
+| `read_case` | 讀 `.cas.h5` / `.msh`；`with_data=True` 同時讀 `.dat`，會帶回之前的殘差紀錄 |
+| `check_mesh` | `/mesh/check` + `/mesh/quality`：最小正交品質、最大長寬比、最小體積 |
+| `get_setup_summary` | 模型、邊界條件、求解器設定（p-v coupling、離散格式、鬆弛因子） |
+| `report_mass_balance` | 各邊界質量流率與淨不平衡百分比 |
+| `initialize` | hybrid（建議）或 standard 初始化 |
+| `iterate` | 跑 N 次迭代，回傳最新殘差、各方程式趨勢、新出現的警告 |
+| `get_residual_history` | 殘差歷史與趨勢分析（下降／停滯／振盪／上升） |
+| `diagnose_convergence` | **收斂診斷**：整合網格、質量守恆、設定、殘差趨勢、迭代警告，列出可能原因與建議（唯讀，不改設定） |
+| `run_tui_commands` | 執行任意 Fluent TUI 指令並回傳輸出 |
+| `run_journal` | 執行 `.jou` journal 檔 |
+| `write_case_data` | 存 case + data |
 
-- **Ansys Fluent** (via PyFluent)
-- **Ansys MAPDL** (via PyMAPDL)
-- **Ansys Mechanical** (via PyMechanical)
-- **Ansys Geometry** (via PyAnsys Geometry)
+每個指令都包在 Fluent transcript 裡執行，所以 AI 看得到 Fluent console 的完整輸出，包括 `reversed flow`、`turbulent viscosity limited` 這類警告。
 
-## Installation
+## 安裝（在有 Ansys 的電腦上）
 
-### Prerequisites
+需求：Ansys Fluent 2025 R1/R2（或其他 PyFluent 支援的版本）、Python 3.10–3.13（建議 3.12）。
 
-1. **Python 3.8+** is required
-2. **Ansys Software** must be installed on your system
-3. **Ansys Python Libraries** (PyAnsys packages) should be installed
-
-### Install from PyPI (when available)
-
-```bash
-pip install ansys-mcp-server
+```powershell
+git clone https://github.com/017-YiChing/ansys-mcp-server.git C:\ansys-mcp-server
+cd C:\ansys-mcp-server
+py -3.12 -m venv .venv
+.venv\Scripts\pip install -r requirements.txt
 ```
 
-### Install from Source
+確認 Ansys 有被找到（應該看到 `AWP_ROOT251` 或 `AWP_ROOT252`）：
 
-```bash
-git clone https://github.com/yourusername/ansys-mcp-server.git
-cd ansys-mcp-server
-pip install -r requirements.txt
-pip install -e .
+```powershell
+Get-ChildItem env:AWP_ROOT*
 ```
 
-### Install Ansys Python Packages
+## 接到 Claude
 
-```bash
-# Install PyAnsys packages based on your Ansys products
-pip install ansys-fluent-core      # For Fluent
-pip install ansys-mapdl-core       # For MAPDL
-pip install ansys-mechanical-core  # For Mechanical
-pip install ansys-geometry-core    # For Geometry
+**Claude Code：**
+
+```powershell
+claude mcp add ansys -e ANSYS_MCP_WORKDIR=C:/cfd/work -- C:/ansys-mcp-server/.venv/Scripts/python.exe C:/ansys-mcp-server/ansys_mcp_server.py
 ```
 
-## Quick Start
-
-### 1. Configuration
-
-Set your Ansys installation path (optional):
-
-```bash
-export ANSYS_ROOT="/path/to/ansys/installation"
-```
-
-### 2. Running the Server
-
-```bash
-# Run as a standalone server
-python ansys_mcp_server.py
-
-# Or use the installed command
-ansys-mcp-server
-```
-
-### 3. Integration with AI Tools
-
-The server implements the MCP protocol and can be integrated with any MCP-compatible AI tool. Here's an example configuration:
+**Claude 桌面版**（`%APPDATA%\Claude\claude_desktop_config.json`）：
 
 ```json
 {
-  "name": "ansys-mcp",
-  "command": "python",
-  "args": ["/path/to/ansys_mcp_server.py"],
-  "env": {
-    "ANSYS_ROOT": "/path/to/ansys"
+  "mcpServers": {
+    "ansys": {
+      "command": "C:/ansys-mcp-server/.venv/Scripts/python.exe",
+      "args": ["C:/ansys-mcp-server/ansys_mcp_server.py"],
+      "env": { "ANSYS_MCP_WORKDIR": "C:/cfd/work" }
+    }
   }
 }
 ```
 
-## Available Tools
+`ANSYS_MCP_WORKDIR` 是 Fluent 的工作資料夾（暫存的 transcript 也放這裡），沒設定時用啟動目錄下的 `ansys_work/`。
 
-### System Tools
+## 使用方式
 
-- **check_ansys_status**: Verify Ansys installation and available modules
-- **read_ansys_file**: Read and analyze various Ansys file formats
+### 方式 A：讓 AI 開 Fluent
 
-### Fluent Tools
+> 用 Fluent 2025R2、8 核心開啟 `C:/cfd/room.cas.h5`，檢查網格後用 hybrid 初始化，先跑 200 次。
 
-- **create_fluent_session**: Launch a new Fluent session
-- **run_fluent_commands**: Execute Fluent TUI commands
+### 方式 B：連到你已經開好的 Fluent（適合排查既有案例）
 
-### MAPDL Tools
+1. 在 Fluent 中 **File → Applications → Server → Start**，存出 server info 檔（例如 `C:/cfd/server_info.txt`）。
+   也可以用指令啟動：`fluent 3ddp -sifile=C:/cfd/server_info.txt`
+2. 對 AI 說：
 
-- **create_mapdl_session**: Launch a new MAPDL session
-- **run_mapdl_commands**: Execute APDL commands
+> 連到 `C:/cfd/server_info.txt` 的 Fluent，幫我檢查為什麼 continuity 一直不收斂。
 
-## Usage Examples
+### 診斷 continuity 不收斂
 
-### Check Ansys Status
+`diagnose_convergence` 會一次收集：
 
-```python
-# AI Assistant can use this tool to verify Ansys availability
-result = await call_tool("check_ansys_status", {})
+- **網格**：最小正交品質（< 0.01 幾乎一定出問題，建議 > 0.1）、負體積
+- **質量守恆**：淨質量流率不平衡 %（< 0.5% 通常可接受）
+- **殘差趨勢**：continuity 是在下降、停滯、振盪還是上升
+- **迭代警告**：出口回流（reversed flow）、湍流黏度被限制、發散
+- **求解器設定**：p-v coupling、離散格式、鬆弛因子
+
+然後依嚴重程度列出可能原因與建議。注意：
+
+- 殘差紀錄來自 `iterate` 的輸出，或 `read_case(with_data=True)` 讀入的歷史。
+  **建議先跑 100–200 次迭代再診斷**，因為 reversed flow 等警告只在迭代時出現。
+- Fluent 的 continuity 殘差是「相對前 5 次迭代」的比例，常停在 1e-3～1e-2。
+  若質量守恆 < 0.5% 且關心的監測值已平穩，通常可視為收斂，工具會提示這種情況。
+- 診斷是啟發式判斷，最後仍需要你依物理意義判讀。
+
+## 注意事項
+
+- **路徑請用純英文**：Fluent 讀寫含中文的路徑（例如 OneDrive 的「國立成功大學」資料夾）常會失敗。
+- **大量迭代請分段**：每次 `iterate` 建議 ≤ 300 次。若單次計算很久，可提高 Claude Code 的 MCP 逾時，例如設定環境變數 `MCP_TOOL_TIMEOUT=3600000`（毫秒）。
+- `connect_to_fluent` 時，Fluent 必須跟 MCP server 在**同一台電腦**（transcript 檔需要能讀到）。
+- 修改物理模型、邊界條件或求解器設定前，AI 會先告訴你要改什麼。
+
+## 測試
+
+不需要 Ansys，用模擬的 Fluent 輸出測試解析、診斷與 MCP 通訊：
+
+```powershell
+.venv\Scripts\python -m pytest -o asyncio_mode=auto
 ```
-
-### Create a Fluent Session
-
-```python
-# Launch Fluent in 3D double precision mode
-result = await call_tool("create_fluent_session", {
-    "precision": "double",
-    "dimension": "3d"
-})
-```
-
-### Read an Ansys File
-
-```python
-# Analyze a Fluent case file
-result = await call_tool("read_ansys_file", {
-    "file_path": "/path/to/simulation.cas"
-})
-```
-
-### Execute MAPDL Commands
-
-```python
-# Run MAPDL preprocessing commands
-result = await call_tool("run_mapdl_commands", {
-    "commands": [
-        "/PREP7",
-        "ET,1,SOLID186",
-        "BLOCK,0,1,0,1,0,1",
-        "ESIZE,0.1",
-        "VMESH,ALL"
-    ]
-})
-```
-
-## Resources
-
-The server provides access to:
-
-- **ansys://status**: Real-time Ansys installation status
-- **ansys://working-directory**: Current working directory and files
-- **ansys://sessions**: Active Ansys sessions (future feature)
-
-## Development
-
-### Project Structure
-
-```
-ansys-mcp-server/
-├── ansys_mcp_server.py    # Main server implementation
-├── requirements.txt       # Dependencies
-├── setup.py              # Package setup
-├── README.md             # This file
-├── LICENSE               # MIT License
-├── tests/                # Test suite
-│   ├── test_server.py
-│   └── test_ansys_interface.py
-└── examples/             # Usage examples
-    ├── fluent_example.py
-    └── mapdl_example.py
-```
-
-### Running Tests
-
-```bash
-pytest tests/
-```
-
-### Code Formatting
-
-```bash
-black ansys_mcp_server.py
-flake8 ansys_mcp_server.py
-```
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Acknowledgments
-
-- [Ansys](https://www.ansys.com/) for providing excellent simulation software
-- [PyAnsys](https://github.com/ansys) project for Python interfaces
-- [Model Context Protocol](https://modelcontextprotocol.io/) for the communication standard
-- [Anthropic](https://www.anthropic.com/) for MCP development and support
-
-## Support
-
-- **Documentation**: [GitHub Wiki](https://github.com/yourusername/ansys-mcp-server/wiki)
-- **Issues**: [GitHub Issues](https://github.com/yourusername/ansys-mcp-server/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/yourusername/ansys-mcp-server/discussions)
-
-## Roadmap
-
-- [ ] Support for more Ansys products (CFX, Icepak, etc.)
-- [ ] Advanced file format support
-- [ ] Real-time simulation monitoring
-- [ ] Batch job management
-- [ ] Cloud integration (Ansys Cloud, AWS, Azure)
-- [ ] Advanced visualization tools
-- [ ] Optimization workflow support
-- [ ] Integration with Ansys Workbench
-
----
-
-**Note**: This is an unofficial tool and is not affiliated with or endorsed by Ansys, Inc. Ansys is a registered trademark of Ansys, Inc.
+MIT
